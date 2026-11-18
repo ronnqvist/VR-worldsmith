@@ -36,7 +36,8 @@ Default model: `deepseek/deepseek-v4-flash`. Pick another from the dropdown or t
 
 | Input | Action |
 |---|---|
-| Left trigger (hold) / mic orb / mic button | Talk (release to send) |
+| Left trigger (hold) / mic button (2D page) | Talk (release to send) |
+| Orb on the left controller | Status light (red = listening, purple = thinking, green = speaking); point the laser at it and pull the trigger to toggle listening |
 | Left X | Open the VR keyboard |
 | Left Y | Show/hide the wrist panel |
 | Left stick / WASD | Move |
