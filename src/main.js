@@ -21,6 +21,7 @@ import { initVRUI } from './ui/panelVR.js';
 import { initDomUI } from './ui/dom.js';
 import { createVRKeyboard } from './voice/keyboardVR.js';
 import { createSpeechInput } from './voice/speech.js';
+import { createCloudSpeech } from './voice/cloudSpeech.js';
 import { createTTS } from './voice/tts.js';
 import { createInjector } from './world/injector.js';
 import { sanitizeMarkup } from './world/sanitize.js';
@@ -188,9 +189,30 @@ async function boot() {
     getMode: () => state.settings.inputMode
   });
   await speech.init();
+  // Record + transcribe through OpenRouter: the voice path on browsers without
+  // SpeechRecognition (Meta Quest Browser).
+  const cloud = createCloudSpeech({
+    getConfig: () => ({ apiKey, model: state.settings.sttModel, referer: state.settings.referer, title: state.settings.title })
+  });
+  let activeEngine = null;
+
+  /** Chooses the speech engine for the current settings; null → keyboard. */
+  function pickEngine() {
+    const s = state.settings;
+    if (s.inputMode === 'keyboard') return null;
+    if (s.voiceEngine === 'browser') return speech.isSupported() ? speech : null;
+    if (s.voiceEngine === 'openrouter') return cloud.isSupported() ? cloud : null;
+    if (speech.isSupported() && !speech.isBroken()) return speech;
+    return cloud.isSupported() ? cloud : null;
+  }
+  function refreshVoiceState() {
+    const e = pickEngine();
+    state.voiceEngineActive = e === speech ? 'browser' : e === cloud ? 'openrouter' : 'keyboard';
+    state.speechSupported = speech.isSupported() || cloud.isSupported();
+    state.speechBroken = speech.isBroken();
+  }
   state.ttsAvailable = tts.available;
-  state.speechSupported = speech.isSupported();
-  state.speechBroken = speech.isBroken();
+  refreshVoiceState();
 
   /* ---------- prompt pipeline ---------- */
   let busy = false;
@@ -268,37 +290,50 @@ async function boot() {
       });
       return;
     }
-    if (!forceKeyboard && speech.shouldUseVoice()) { listenStart(); return; }
+    if (!forceKeyboard && pickEngine()) { listenStart(); return; }
     bus.emit('dom:focus-prompt', { value: value || undefined });
   }
 
   function listenStart() {
-    if (busy) { toast('Still dreaming up the last request…'); return; }
+    if (busy || cloud.isBusy()) { toast('Still working on the last request…'); return; }
     if (state.phase === 'listening') return;
-    if (!speech.shouldUseVoice()) { openPromptInput({ forceKeyboard: true }); return; }
+    const engine = pickEngine();
+    if (!engine) { openPromptInput({ forceKeyboard: true }); return; }
+    activeEngine = engine;
     tts.cancel();
-    const ok = speech.start({
+    const ok = engine.start({
       onInterim: (text) => { bus.emit('transcript', { text }); caption(text, 'transcript', 0); },
       onFinal: (text) => { bus.emit('transcript', { text, final: true }); submitPrompt(text); },
+      onTranscribing: () => { setPhase('thinking'); caption('Transcribing…', 'transcript', 0); },
+      onLevel: (rms) => bus.emit('mic:level', { rms }),
       onError: ({ fatal, message }) => {
-        toast(message, 'error', 5000);
+        if (fatal && engine === speech && state.settings.voiceEngine === 'auto' && cloud.isSupported()) {
+          // Browser recognizer is unusable here: fall through to OpenRouter transcription.
+          refreshVoiceState();
+          setPhase('idle');
+          changed();
+          toast('Browser speech recognition is unavailable; switched to OpenRouter transcription. Try again.', 'info', 6000);
+          return;
+        }
+        toast(message, 'error', 6000);
         if (fatal) {
-          state.speechBroken = speech.isBroken();
+          refreshVoiceState();
           setPhase('idle');
           changed();
           openPromptInput({ forceKeyboard: true });
         }
       },
       onEnd: () => {
-        if (state.phase === 'listening') { setPhase('idle'); caption('', 'info', 1); }
+        activeEngine = null;
+        if (state.phase === 'listening' || (state.phase === 'thinking' && !busy)) { setPhase('idle'); caption('', 'info', 1); }
       }
     });
     if (ok) {
       setPhase('listening');
-      caption('Listening… release or tap again to send.', 'transcript', 0);
+      caption(engine === cloud ? 'Listening… release (or tap again) when done.' : 'Listening… release or tap again to send.', 'transcript', 0);
     }
   }
-  function listenStop() { if (state.phase === 'listening') speech.stop(); }
+  function listenStop() { if (state.phase === 'listening') activeEngine?.stop(); }
   function listenToggle() { if (state.phase === 'listening') listenStop(); else listenStart(); }
 
   bus.on('ptt:down', () => listenStart());
@@ -325,6 +360,7 @@ async function boot() {
   async function updateSettings(partial) {
     state.settings = await store.saveSettings(partial);
     applySettings();
+    refreshVoiceState();
     changed();
     return state.settings;
   }
@@ -335,6 +371,7 @@ async function boot() {
     apiKey = k;
     state.hasKey = !!k;
     state.keyHint = keyHint(k);
+    refreshVoiceState();
     if (k && !looksLikeKey(k)) toast('That does not look like an OpenRouter key (sk-or-…). Saved anyway.', 'error', 5000);
     changed();
   }
@@ -361,6 +398,7 @@ async function boot() {
   function resetWorld() {
     inflight?.abort();
     tts.cancel();
+    cloud.abort();
     injector.reset();
     toast('World reset.', 'info', 5000, 'Undo', () => injector.undo());
   }

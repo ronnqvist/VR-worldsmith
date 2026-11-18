@@ -18,7 +18,7 @@ export function normalizeSettings(input = {}) {
   const d = DEFAULT_SETTINGS;
   const model = str(s.model, 120, d.model).trim();
   return {
-    model: /^[\w.\-/:@]+$/.test(model) ? model : d.model,
+    model: /^[\w.\-/:@~]+$/.test(model) ? model : d.model,
     referer: str(s.referer, 200, d.referer),
     title: str(s.title, 100, d.title),
     temperature: num(s.temperature, 0, 2, d.temperature),
@@ -27,6 +27,8 @@ export function normalizeSettings(input = {}) {
     vignette: bool(s.vignette, d.vignette),
     smoothSpeed: num(s.smoothSpeed, 0.5, 5, d.smoothSpeed),
     inputMode: ['auto', 'voice', 'keyboard'].includes(s.inputMode) ? s.inputMode : d.inputMode,
+    voiceEngine: ['auto', 'browser', 'openrouter'].includes(s.voiceEngine) ? s.voiceEngine : d.voiceEngine,
+    sttModel: (() => { const m = str(s.sttModel, 120, d.sttModel).trim(); return /^[\w.\-/:@~]+$/.test(m) ? m : d.sttModel; })(),
     diagnostics: bool(s.diagnostics, d.diagnostics),
     preferMR: bool(s.preferMR, d.preferMR),
     showStats: bool(s.showStats, d.showStats)

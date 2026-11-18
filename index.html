@@ -93,6 +93,18 @@
             <option value="keyboard">Keyboard</option>
           </select>
         </label>
+        <label class="ws-field">Voice engine
+          <select id="ws-voice-engine">
+            <option value="auto">Auto (browser speech if available, else OpenRouter)</option>
+            <option value="browser">Browser speech recognition</option>
+            <option value="openrouter">OpenRouter audio transcription</option>
+          </select>
+          <small class="ws-dim" id="ws-voice-status"></small>
+        </label>
+        <label class="ws-field">Transcription model (audio-capable)
+          <select id="ws-stt-select"></select>
+          <input id="ws-stt-model" type="text" spellcheck="false" />
+        </label>
         <div class="ws-checks">
           <label><input type="checkbox" id="ws-tts" /> Spoken narration</label>
           <label><input type="checkbox" id="ws-vignette" /> Comfort vignette in VR</label>
@@ -186,7 +198,7 @@
     <!-- World-space UI panels (canvas textures) -->
     <a-entity id="ws-hud" ws-canvas-panel="width: 0.95; height: 0.26" ws-lazy-follow="distance: 1.5; yOffset: -0.42" visible="false"></a-entity>
     <a-entity id="ws-keyboard" ws-canvas-panel="width: 1.1; height: 0.62" visible="false"></a-entity>
-    <a-entity id="ws-settings-panel" ws-canvas-panel="width: 0.95; height: 0.86" visible="false"></a-entity>
+    <a-entity id="ws-settings-panel" ws-canvas-panel="width: 0.95; height: 0.96" visible="false"></a-entity>
     <a-entity id="ws-list-panel" ws-canvas-panel="width: 0.95; height: 0.9" visible="false"></a-entity>
 
     <!-- Player rig -->

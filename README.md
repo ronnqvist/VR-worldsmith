@@ -56,8 +56,14 @@ The 2D page mirrors all of this and works with mouse and keyboard only.
 - **Mixed reality** (`immersive-ar`): the **Enter MR** button only appears when the browser reports support.
   Sky, ground and fog are suppressed. Quest 2 passthrough is **grayscale**; Quest 3/Pro have color.
   Switching VR ⇄ MR inside a session may ask for one extra tap.
-- **Voice**: Meta Quest Browser often lacks a working `SpeechRecognition`. Worldsmith detects that
-  (missing API, or a runtime failure which is remembered) and routes to the in-VR keyboard.
+- **Voice**: Meta Quest Browser has no `SpeechRecognition`, so Worldsmith records the mic itself
+  (16 kHz WAV, max 30 s) and transcribes the clip with an audio-capable OpenRouter model
+  (default `google/gemini-3.5-flash-lite`, roughly $0.0001 per 10 s clip), then sends the text as your prompt.
+  The audio goes to that model's provider via OpenRouter. Browsers that do have working
+  `SpeechRecognition` (desktop Chrome/Edge) use it instead. You can force either in
+  **Settings → Voice engine**, or pick **Input: Keyboard** to always use the in-VR keyboard.
+  **Tip:** press the mic button once on the 2D page before entering VR, so the microphone permission
+  prompt is answered outside the headset view.
   Narration uses `speechSynthesis` when available, otherwise a floating caption.
 - **Desktop**: plain Chrome/Edge works with mouse look; a headset also works.
 

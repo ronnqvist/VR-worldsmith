@@ -45,6 +45,15 @@ export const MODEL_PRESETS = Object.freeze([
   { id: 'qwen/qwen3-coder', label: 'Qwen3 Coder' }
 ]);
 
+/** Audio-capable models for speech-to-text when the browser has no SpeechRecognition. */
+export const DEFAULT_STT_MODEL = 'google/gemini-3.5-flash-lite';
+export const STT_MODEL_PRESETS = Object.freeze([
+  { id: 'google/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (default, cheap)' },
+  { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'openai/gpt-audio-mini', label: 'GPT Audio mini' }
+]);
+
 export const DEFAULT_SETTINGS = Object.freeze({
   model: DEFAULT_MODEL,
   referer: '',            // optional HTTP-Referer header (blank = omit)
@@ -55,6 +64,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   vignette: true,
   smoothSpeed: 2.0,       // m/s
   inputMode: 'auto',      // 'auto' | 'voice' | 'keyboard'
+  voiceEngine: 'auto',    // 'auto' | 'browser' (Web Speech) | 'openrouter' (record + transcribe)
+  sttModel: DEFAULT_STT_MODEL,
   diagnostics: false,
   preferMR: false,
   showStats: false

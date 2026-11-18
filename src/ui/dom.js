@@ -4,7 +4,7 @@
  * history, saved worlds, undo/reset/export/import, VR/MR entry, captions,
  * toasts, diagnostics. A pure view over `app` (see main.js) — no A-Frame here.
  */
-import { MODEL_PRESETS } from '../core/config.js';
+import { MODEL_PRESETS, STT_MODEL_PRESETS } from '../core/config.js';
 import { onLog, getLogEntries } from '../core/log.js';
 
 const PHASE_LABEL = { idle: 'Ready', listening: 'Listening…', thinking: 'Dreaming up your world…', speaking: 'Speaking', error: 'Error' };
@@ -140,12 +140,23 @@ export function initDomUI({ app, bus }) {
   });
   modelInput.addEventListener('change', () => { if (modelInput.value.trim()) app.updateSettings({ model: modelInput.value.trim() }); });
 
+  const sttSelect = $('ws-stt-select');
+  for (const m of STT_MODEL_PRESETS) sttSelect.append(new Option(m.label, m.id));
+  sttSelect.append(new Option('Custom (type below)…', '__custom'));
+  const sttInput = $('ws-stt-model');
+  sttSelect.addEventListener('change', () => {
+    if (sttSelect.value === '__custom') { sttInput.focus(); return; }
+    app.updateSettings({ sttModel: sttSelect.value });
+  });
+  sttInput.addEventListener('change', () => { if (sttInput.value.trim()) app.updateSettings({ sttModel: sttInput.value.trim() }); });
+
   const bindText = (id, key, parse = (v) => v) => $(id).addEventListener('change', (e) => app.updateSettings({ [key]: parse(e.target.value) }));
   bindText('ws-title', 'title');
   bindText('ws-referer', 'referer');
   bindText('ws-temperature', 'temperature', Number);
   bindText('ws-maxtokens', 'maxTokens', Number);
   bindText('ws-input-mode', 'inputMode');
+  bindText('ws-voice-engine', 'voiceEngine');
   $('ws-tts').addEventListener('change', (e) => app.updateSettings({ ttsMuted: !e.target.checked }));
   $('ws-vignette').addEventListener('change', (e) => app.updateSettings({ vignette: e.target.checked }));
   $('ws-diagnostics').addEventListener('change', (e) => app.updateSettings({ diagnostics: e.target.checked }));
@@ -163,6 +174,14 @@ export function initDomUI({ app, bus }) {
     setVal('ws-temperature', s.temperature);
     setVal('ws-maxtokens', s.maxTokens);
     $('ws-input-mode').value = s.inputMode;
+    $('ws-voice-engine').value = s.voiceEngine;
+    sttSelect.value = STT_MODEL_PRESETS.some((m) => m.id === s.sttModel) ? s.sttModel : '__custom';
+    if (document.activeElement !== sttInput) sttInput.value = s.sttModel;
+    $('ws-voice-status').textContent = {
+      browser: 'Active: browser speech recognition.',
+      openrouter: 'Active: recording + OpenRouter transcription (small cost per clip).',
+      keyboard: 'Active: keyboard (no voice engine available).'
+    }[app.state.voiceEngineActive] || '';
     $('ws-tts').checked = !s.ttsMuted;
     $('ws-vignette').checked = s.vignette;
     $('ws-diagnostics').checked = s.diagnostics;

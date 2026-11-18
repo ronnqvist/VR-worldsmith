@@ -185,3 +185,60 @@ export async function validateKey({ apiKey, model, referer, title, signal, fetch
   }
   return { ok: true, key, model: modelResult };
 }
+
+const TRANSCRIBE_SYSTEM = 'You are a speech-to-text engine. Return ONLY the verbatim transcript of what the speaker says, '
+  + 'in the language spoken, with normal punctuation. No quotes, labels, translations or commentary. '
+  + 'If there is no intelligible speech, return an empty string.';
+
+/** Removes wrappers models sometimes add around a transcript. */
+export function cleanTranscript(text) {
+  let t = String(text || '').trim();
+  t = t.replace(/^```[a-z]*\s*|\s*```$/gi, '').trim();
+  t = t.replace(/^(transcript(ion)?|text)\s*:\s*/i, '').trim();
+  t = t.replace(/^["“”'«»]+|["“”'«»]+$/g, '').trim();
+  if (/^(\(|\[)?\s*(no (intelligible )?speech|silence|inaudible|empty)\s*(\)|\])?\.?$/i.test(t)) return '';
+  return t.slice(0, 2000);
+}
+
+/**
+ * Speech-to-text through an audio-capable OpenRouter model: the clip goes in an
+ * `input_audio` content part (base64 WAV). Used where the browser has no
+ * SpeechRecognition (Meta Quest Browser).
+ * @returns {Promise<string>} transcript ('' when no speech)
+ */
+export async function transcribeAudio({ apiKey, model, wavBase64, referer, title, signal, fetchImpl }) {
+  if (!apiKey) throw new UserFacingError('Voice input needs your OpenRouter API key (Settings).', { code: 'no_key' });
+  if (!model) throw new UserFacingError('Choose a transcription model in Settings.', { code: 'no_model' });
+  const headers = buildHeaders({ apiKey, referer, title });
+  const body = {
+    model,
+    temperature: 0,
+    max_tokens: 600,
+    stream: false,
+    messages: [
+      { role: 'system', content: TRANSCRIBE_SYSTEM },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Transcribe this recording.' },
+          { type: 'input_audio', input_audio: { data: wavBase64, format: 'wav' } }
+        ]
+      }
+    ]
+  };
+  const started = performance.now();
+  let data;
+  try {
+    data = await request('/chat/completions', { headers, body, signal, fetchImpl });
+  } catch (err) {
+    if (err.code === 'bad_request' || err.code === 'model') {
+      throw new UserFacingError(`The transcription model "${model}" could not process audio. Pick an audio-capable model in Settings.`, { code: 'stt_model', cause: err, detail: err.detail });
+    }
+    throw err;
+  }
+  if (data?.error) throw mapHttpError(Number(data.error.code) || 502, data);
+  const content = data?.choices?.[0]?.message?.content;
+  const text = cleanTranscript(typeof content === 'string' ? content : Array.isArray(content) ? content.map((p) => p.text || '').join(' ') : '');
+  log.info(`transcribed in ${Math.round(performance.now() - started)} ms`, { model: data?.model, chars: text.length });
+  return text;
+}

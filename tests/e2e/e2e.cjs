@@ -166,6 +166,46 @@ const check = async (name, fn) => {
 
   await page.screenshot({ path: process.env.SHOT || 'e2e.png' });
   await browser.close();
+
+  // ---- Quest-like voice: no SpeechRecognition, real (fake) microphone → OpenRouter transcription ----
+  const vb = await chromium.launch({ args: ['--use-gl=swiftshader', '--ignore-gpu-blocklist', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
+  const vctx = await vb.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['microphone'] });
+  await vctx.addInitScript(() => { delete window.SpeechRecognition; delete window.webkitSpeechRecognition; });
+  const vp = await vctx.newPage();
+  const seen = { audio: null, prompt: null };
+  await vp.route('https://openrouter.ai/**', async (route) => {
+    const body = route.request().postDataJSON();
+    const audioPart = body.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).find((p) => p.type === 'input_audio');
+    if (audioPart) {
+      seen.audio = audioPart.input_audio;
+      return route.fulfill({ json: { choices: [{ message: { content: 'make a red cube' }, finish_reason: 'stop' }] } });
+    }
+    seen.prompt = body.messages.at(-1).content;
+    return route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ action: 'create_world', markup: '<a-box id="red-cube" color="red" position="0 1 -3"></a-box>', removed_ids: [], narration: 'A red cube.' }) }, finish_reason: 'stop' }] } });
+  });
+  await vp.goto(BASE);
+  await vp.waitForFunction(() => window.worldsmith, null, { timeout: 30000 });
+  await vp.evaluate(() => window.worldsmith.app.setApiKey('sk-or-v1-voice-voice-voice'));
+
+  await check('without SpeechRecognition the OpenRouter voice engine is chosen', async () => {
+    assert.equal(await vp.evaluate(() => window.worldsmith.app.state.voiceEngineActive), 'openrouter');
+  });
+
+  await check('hold mic → recorded WAV is transcribed → prompt builds the world (no keyboard)', async () => {
+    const box = await vp.locator('#ws-mic').boundingBox();
+    await vp.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await vp.mouse.down();
+    await vp.waitForFunction(() => window.worldsmith.app.state.phase === 'listening', null, { timeout: 5000 });
+    await vp.waitForTimeout(1500);
+    await vp.mouse.up();
+    await vp.waitForFunction(() => window.worldsmith.injector.topLevelIds().includes('red-cube'), null, { timeout: 15000 });
+    assert.equal(seen.audio.format, 'wav');
+    assert.ok(seen.audio.data.startsWith('UklGR'), 'base64 WAV');
+    assert.ok(seen.audio.data.length > 20000, 'clip has audio');
+    assert.match(seen.prompt, /REQUEST: make a red cube/);
+    assert.equal(await vp.evaluate(() => document.getElementById('ws-keyboard').getAttribute('visible')), false);
+  });
+  await vb.close();
   console.log(failures ? `\n${failures} failure(s)` : '\nall e2e checks passed');
   process.exit(failures ? 1 : 0);
 })();

@@ -244,7 +244,7 @@ export function initVRUI({ sceneEl, app, bus, keyboard }) {
   }
 
   P(settingsEl)?.configure({
-    width: 0.95, height: 0.86, pxPerMeter: 1300,
+    width: 0.95, height: 0.96, pxPerMeter: 1300,
     render(ctx, api) {
       api.background();
       const st = app.state;
@@ -282,9 +282,16 @@ export function initVRUI({ sceneEl, app, bus, keyboard }) {
       toggle('vignette', 'Comfort vignette', s.vignette, 'Darkens edges while moving');
       toggle('diag', 'Diagnostics', s.diagnostics, 'FPS, draw calls, logging');
 
-      label('Input', st.speechSupported ? (st.speechBroken ? 'Voice failed here; keyboard used' : 'Voice when available') : 'Voice unavailable — keyboard');
-      ['auto', 'voice', 'keyboard'].forEach((m, i) => {
-        api.button(`input-${m}`, right - 570 + i * 190, y, 180, rowH, m[0].toUpperCase() + m.slice(1), { variant: s.inputMode === m ? 'on' : undefined, fontSize: 26 });
+      const activeLabel = { browser: 'Active: browser speech', openrouter: 'Active: OpenRouter transcription', keyboard: 'Active: keyboard' }[st.voiceEngineActive] || '';
+      label('Input', activeLabel);
+      [['auto', 'Auto'], ['voice', 'Voice'], ['keyboard', 'Keyboard']].forEach(([m, t], i) => {
+        api.button(`input-${m}`, right - 570 + i * 190, y, 180, rowH, t, { variant: s.inputMode === m ? 'on' : undefined, fontSize: 26 });
+      });
+      y += rowH + gap;
+
+      label('Voice engine', `Transcription model: ${s.sttModel}`);
+      [['auto', 'Auto'], ['browser', 'Browser'], ['openrouter', 'OpenRouter']].forEach(([m, t], i) => {
+        api.button(`engine-${m}`, right - 570 + i * 190, y, 180, rowH, t, { variant: s.voiceEngine === m ? 'on' : undefined, fontSize: 24 });
       });
       y += rowH + gap;
 
@@ -320,6 +327,9 @@ export function initVRUI({ sceneEl, app, bus, keyboard }) {
             onSubmit: (v) => app.updateSettings({ model: v.replace(/\s+/g, '') })
           });
           return;
+        case 'engine-auto': case 'engine-browser': case 'engine-openrouter':
+          app.updateSettings({ voiceEngine: id.slice(7) });
+          break;
         case 'tts': app.updateSettings({ ttsMuted: !s.ttsMuted }); break;
         case 'vignette': app.updateSettings({ vignette: !s.vignette }); break;
         case 'diag': app.updateSettings({ diagnostics: !s.diagnostics }); break;
