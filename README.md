@@ -102,8 +102,9 @@ browsers cannot show a file picker inside it.
 
 ## Deploying to GitHub Pages
 
-1. Repo **Settings → Pages → Source: GitHub Actions**.
-2. Merge to / push `main`. `.github/workflows/deploy.yml` runs tests, builds and publishes `dist/`.
+`.github/workflows/deploy.yml` runs on every push to `main` (or the current dev branch): tests, build,
+then force-pushes `dist/` to the **`gh-pages`** branch. Pages serves that branch
+(**Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` / `(root)`**).
 
 The build uses relative paths, so it works under `/VR-worldsmith/` without configuration.
 
