@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="description" content="Worldsmith — speak a world into existence in WebXR." />
+  <meta name="theme-color" content="#0b1020" />
+  <!-- %WS_CSP% (production Content-Security-Policy injected by vite.config.js) -->
+  <title>Worldsmith — voice-prompted WebXR worlds</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <script>
+    // Boot contract with A-Frame (see src/main.js):
+    //  • AFRAME_ASYNC: A-Frame waits for AFRAME.emitReady(), so all custom
+    //    components are registered and the ambient audio is generated first.
+    //  • AFRAME_CDN_ROOT: A-Frame's default text font is resolved relative to
+    //    this, so it loads from ./fonts/ (bundled) instead of cdn.aframe.io.
+    window.AFRAME_ASYNC = true;
+    window.AFRAME_CDN_ROOT = new URL('./', document.baseURI).href;
+  </script>
+  <script type="module" src="/src/main.js"></script>
+</head>
+<body>
+  <!-- Loading screen (removed once the scene renders) -->
+  <div id="ws-loading" role="status" aria-live="polite">
+    <div class="ws-loading-inner">
+      <svg class="ws-logo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><path d="M32 4 56 18v28L32 60 8 46V18z" fill="url(#lg)"/><path d="M32 16 44 23v14L32 44 20 37V23z" fill="#0b1020" opacity=".55"/></svg>
+      <h1>Worldsmith</h1>
+      <p id="ws-loading-msg">Forging the void…</p>
+      <noscript><p>Worldsmith needs JavaScript.</p></noscript>
+    </div>
+  </div>
+
+  <!-- 2D interface (desktop / non-immersive). Wired by src/ui/dom.js -->
+  <div id="ws-ui" hidden>
+    <header class="ws-topbar">
+      <div class="ws-brand"><span class="ws-dot" id="ws-phase-dot"></span><strong>Worldsmith</strong> <span id="ws-phase-label" class="ws-dim">Ready</span></div>
+      <div class="ws-xr-buttons">
+        <button id="ws-enter-vr" class="ws-btn ws-accent" hidden>Enter VR</button>
+        <button id="ws-enter-mr" class="ws-btn" hidden>Enter MR</button>
+        <button id="ws-drawer-toggle" class="ws-btn" aria-expanded="false" aria-controls="ws-drawer">☰ Menu</button>
+      </div>
+    </header>
+
+    <div id="ws-caption" class="ws-caption" aria-live="polite" hidden></div>
+    <div id="ws-toasts" class="ws-toasts" aria-live="polite"></div>
+
+    <form id="ws-prompt-form" class="ws-prompt" autocomplete="off">
+      <button type="button" id="ws-mic" class="ws-btn ws-mic" title="Hold to talk (or click to toggle)" aria-label="Voice input">🎙</button>
+      <textarea id="ws-prompt" rows="1" placeholder="Describe a world… e.g. “a floating island with waterfalls and glowing crystals”" aria-label="Prompt"></textarea>
+      <button type="submit" id="ws-send" class="ws-btn ws-accent">Send</button>
+    </form>
+    <p class="ws-hint ws-dim" id="ws-hint">Drag to look · WASD to move · Q/E to turn · drag objects marked interactive · Del while dragging deletes</p>
+
+    <aside id="ws-drawer" class="ws-drawer" hidden>
+      <nav class="ws-tabs" role="tablist">
+        <button role="tab" data-tab="settings" class="ws-tab" aria-selected="true">Settings</button>
+        <button role="tab" data-tab="history" class="ws-tab">History</button>
+        <button role="tab" data-tab="worlds" class="ws-tab">Worlds</button>
+        <button role="tab" data-tab="tools" class="ws-tab">Tools</button>
+      </nav>
+
+      <section data-panel="settings" class="ws-panel">
+        <label class="ws-field">OpenRouter API key
+          <div class="ws-row">
+            <input id="ws-key" type="password" placeholder="sk-or-v1-…" spellcheck="false" autocomplete="off" />
+            <button id="ws-key-show" type="button" class="ws-btn ws-small" aria-label="Show key">👁</button>
+          </div>
+          <small class="ws-dim">Stored only in this browser's localStorage and sent only to openrouter.ai. Get one at openrouter.ai/keys.</small>
+        </label>
+        <div class="ws-row">
+          <button id="ws-key-save" class="ws-btn ws-accent">Save key</button>
+          <button id="ws-key-validate" class="ws-btn">Validate key</button>
+          <button id="ws-key-clear" class="ws-btn ws-danger">Forget key</button>
+        </div>
+        <p id="ws-key-status" class="ws-status" aria-live="polite"></p>
+
+        <label class="ws-field">Model
+          <select id="ws-model-select"></select>
+        </label>
+        <label class="ws-field">Model id (any OpenRouter model)
+          <input id="ws-model" type="text" spellcheck="false" />
+        </label>
+        <div class="ws-grid2">
+          <label class="ws-field">X-Title header <input id="ws-title" type="text" placeholder="(optional)" /></label>
+          <label class="ws-field">HTTP-Referer header <input id="ws-referer" type="text" placeholder="(optional)" /></label>
+          <label class="ws-field">Temperature <input id="ws-temperature" type="number" min="0" max="2" step="0.1" /></label>
+          <label class="ws-field">Max output tokens <input id="ws-maxtokens" type="number" min="256" max="64000" step="256" /></label>
+        </div>
+        <label class="ws-field">Input
+          <select id="ws-input-mode">
+            <option value="auto">Auto (voice if it works, else keyboard)</option>
+            <option value="voice">Voice</option>
+            <option value="keyboard">Keyboard</option>
+          </select>
+        </label>
+        <div class="ws-checks">
+          <label><input type="checkbox" id="ws-tts" /> Spoken narration</label>
+          <label><input type="checkbox" id="ws-vignette" /> Comfort vignette in VR</label>
+          <label><input type="checkbox" id="ws-diagnostics" /> Diagnostics (logging, FPS)</label>
+          <label><input type="checkbox" id="ws-stats" /> Show A-Frame stats</label>
+        </div>
+        <details id="ws-diag-box" hidden>
+          <summary>Diagnostics log</summary>
+          <div id="ws-perf-line" class="ws-dim"></div>
+          <pre id="ws-log"></pre>
+        </details>
+      </section>
+
+      <section data-panel="history" class="ws-panel" hidden>
+        <p class="ws-dim">Last 20 prompts. Click to put one back in the prompt box.</p>
+        <ol id="ws-history" class="ws-list" reversed></ol>
+        <button id="ws-history-clear" class="ws-btn ws-danger ws-small">Clear history</button>
+      </section>
+
+      <section data-panel="worlds" class="ws-panel" hidden>
+        <form id="ws-save-form" class="ws-row">
+          <input id="ws-save-name" type="text" placeholder="Name this world" maxlength="80" />
+          <button class="ws-btn ws-accent" type="submit">Save</button>
+        </form>
+        <ul id="ws-worlds" class="ws-list"></ul>
+      </section>
+
+      <section data-panel="tools" class="ws-panel" hidden>
+        <div class="ws-tools">
+          <button id="ws-undo" class="ws-btn">↶ Undo last change</button>
+          <button id="ws-reset" class="ws-btn ws-danger">Reset world</button>
+          <button id="ws-export" class="ws-btn">Export .worldsmith.json</button>
+          <button id="ws-import" class="ws-btn">Import…</button>
+          <input id="ws-import-file" type="file" accept=".json,.worldsmith.json,application/json" hidden />
+        </div>
+        <p class="ws-dim">VR controls: left stick move · right stick snap-turn · left trigger hold-to-talk · Y wrist menu · X keyboard · right trigger point/grab · grip while holding deletes · B closes panels.</p>
+      </section>
+    </aside>
+
+    <dialog id="ws-import-dialog">
+      <form method="dialog">
+        <h2>Import worlds</h2>
+        <p id="ws-import-summary"></p>
+        <menu>
+          <button value="merge" class="ws-btn ws-accent">Merge</button>
+          <button value="replace" class="ws-btn ws-danger">Replace everything</button>
+          <button value="cancel" class="ws-btn">Cancel</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <div id="ws-gesture" class="ws-gesture" hidden>
+      <p id="ws-gesture-msg">Tap to continue</p>
+      <button id="ws-gesture-btn" class="ws-btn ws-accent">Enter</button>
+    </div>
+  </div>
+
+  <!-- ===================== A-Frame scene shell ===================== -->
+  <a-scene
+    id="ws-scene"
+    renderer="antialias: true; colorManagement: true; foveationLevel: 1; highRefreshRate: false; precision: high; alpha: true; maxCanvasWidth: 1920; maxCanvasHeight: 1920"
+    webxr="referenceSpaceType: local-floor; requiredFeatures: local-floor; optionalFeatures: bounded-floor"
+    xr-mode-ui="enabled: false"
+    loading-screen="enabled: false"
+    device-orientation-permission-ui="enabled: false"
+    keyboard-shortcuts="enterVR: false"
+    shadow="enabled: false"
+    cursor="rayOrigin: mouse; fuse: false"
+    raycaster="objects: .ws-clickable, .interactive; far: 60"
+    ws-perf
+    ws-mouse-grab>
+
+    <a-assets timeout="4000">
+      <!-- src is a procedural WAV blob URL set by src/audio/ambient.js before A-Frame starts -->
+      <audio id="generated-ambient" preload="auto"></audio>
+    </a-assets>
+
+    <!-- App shell environment (hidden in MR; default sky/lights yield to the generated world's own) -->
+    <a-sky id="ws-default-sky" color="#141a33" radius="400" segments-width="24" segments-height="12"></a-sky>
+    <a-circle id="ws-floor" rotation="-90 0 0" radius="24" segments="48" color="#1b2240" roughness="1" metalness="0"></a-circle>
+    <a-ring id="ws-floor-ring" rotation="-90 0 0" position="0 0.005 0" radius-inner="0.9" radius-outer="0.95" segments-theta="48" material="shader: flat; color: #3b4a8a; opacity: 0.6; transparent: true"></a-ring>
+    <a-entity id="ws-env-hemi" light="type: hemisphere; color: #dfe6ff; groundColor: #3b3554; intensity: 1.4"></a-entity>
+    <a-entity id="ws-env-sun" light="type: directional; color: #fff1dc; intensity: 1.8" position="3 8 4"></a-entity>
+
+    <!-- Everything the LLM creates lives in here (sanitized, see src/world/) -->
+    <a-entity id="generated-world"></a-entity>
+
+    <!-- "Dreaming" swirl shown while waiting for the LLM -->
+    <a-entity id="ws-dream" ws-dream></a-entity>
+
+    <!-- World-space UI panels (canvas textures) -->
+    <a-entity id="ws-hud" ws-canvas-panel="width: 0.95; height: 0.26" ws-lazy-follow="distance: 1.5; yOffset: -0.42" visible="false"></a-entity>
+    <a-entity id="ws-keyboard" ws-canvas-panel="width: 1.1; height: 0.62" visible="false"></a-entity>
+    <a-entity id="ws-settings-panel" ws-canvas-panel="width: 0.95; height: 0.86" visible="false"></a-entity>
+    <a-entity id="ws-list-panel" ws-canvas-panel="width: 0.95; height: 0.9" visible="false"></a-entity>
+
+    <!-- Player rig -->
+    <a-entity id="rig" ws-locomotion>
+      <a-entity id="camera" camera position="0 1.6 0" look-controls="pointerLockEnabled: false; magicWindowTrackingEnabled: false">
+        <a-entity id="ws-vignette" ws-vignette position="0 0 -0.12"></a-entity>
+      </a-entity>
+
+      <a-entity id="ws-mic-orb" ws-mic-orb position="0.32 1.28 -0.8"></a-entity>
+
+      <!-- Left hand: wrist panel + push-to-talk. model:false → no CDN controller models -->
+      <a-entity id="ws-left" visible="false"
+                meta-touch-controls="hand: left; model: false"
+                generic-tracked-controller-controls="hand: left; defaultModel: false"
+                ws-controller-bindings="hand: left">
+        <a-box class="ws-hand-model" width="0.035" height="0.03" depth="0.11" position="0 -0.01 0.03" color="#2a3358" roughness="0.6"></a-box>
+        <a-torus class="ws-hand-model" radius="0.035" radius-tubular="0.006" segments-radial="6" segments-tubular="18" position="0 0 -0.02" rotation="0 0 0" color="#7c5cff" emissive="#7c5cff" emissive-intensity="0.6"></a-torus>
+        <a-entity id="ws-wrist" ws-canvas-panel="width: 0.3; height: 0.19; pxPerMeter: 2400" position="0 0.07 0.13" rotation="-55 0 0" visible="false"></a-entity>
+      </a-entity>
+
+      <!-- Right hand: laser pointer + grab -->
+      <a-entity id="ws-right" visible="false"
+                laser-controls="hand: right; model: false"
+                raycaster="objects: .ws-clickable, .interactive; far: 30; lineColor: #8ab4ff; lineOpacity: 0.85"
+                ws-controller-bindings="hand: right"
+                ws-grab>
+        <a-box class="ws-hand-model" width="0.035" height="0.03" depth="0.11" position="0 -0.01 0.03" color="#2a3358" roughness="0.6"></a-box>
+        <a-torus class="ws-hand-model" radius="0.035" radius-tubular="0.006" segments-radial="6" segments-tubular="18" position="0 0 -0.02" color="#22d3ee" emissive="#22d3ee" emissive-intensity="0.6"></a-torus>
+      </a-entity>
+    </a-entity>
+  </a-scene>
+</body>
+</html>
