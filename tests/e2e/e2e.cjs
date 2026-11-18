@@ -17,7 +17,11 @@ const check = async (name, fn) => {
   const pageErrors = [];
   const external = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
-  page.on('request', (r) => { if (!/^(http:\/\/localhost|blob:|data:)/.test(r.url()) && !r.url().startsWith('https://openrouter.ai')) external.push(r.url()); });
+  const origin = new URL(BASE).origin;
+  page.on('request', (r) => {
+    const u = r.url();
+    if (!u.startsWith(origin) && !/^(blob:|data:)/.test(u) && !u.startsWith('https://openrouter.ai')) external.push(u);
+  });
 
   let mode = 'ok';
   let attempts = 0;

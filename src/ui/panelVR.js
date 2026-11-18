@@ -99,7 +99,8 @@ export function initVRUI({ sceneEl, app, bus, keyboard }) {
     if (hud.caption && hud.caption.until && hud.caption.until < now) hud.caption = null;
     if (hud.toast && hud.toast.until < now) hud.toast = null;
     const phase = app.state.phase;
-    const show = !!(hud.caption || hud.toast || phase === 'listening' || phase === 'thinking');
+    // The 3D HUD is for immersive sessions only; the 2D page has its own captions/toasts.
+    const show = app.state.xrMode !== 'none' && !!(hud.caption || hud.toast || phase === 'listening' || phase === 'thinking');
     const panel = P(hudEl);
     if (!panel) return;
     if (show && !hudEl.getAttribute('visible')) {
