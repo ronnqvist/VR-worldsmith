@@ -3,7 +3,9 @@
  * Values read back are re-validated: storage is shared by every page on the
  * same origin, so it is treated as untrusted input.
  */
-import { DEFAULT_SETTINGS, HISTORY_LIMIT, LIMITS } from '../core/config.js';
+import { DEFAULT_SETTINGS, HISTORY_LIMIT, LIMITS, LEGACY_DEFAULTS, SETTINGS_VERSION } from '../core/config.js';
+
+const EFFORT_SETTINGS = ['auto', 'provider', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 const K = { apiKey: 'apiKey', settings: 'settings', world: 'world', history: 'history', worlds: 'worlds', speech: 'speech' };
 const MAX_SAVED_WORLDS = 100;
@@ -16,7 +18,11 @@ const num = (v, lo, hi, fallback) => (typeof v === 'number' && Number.isFinite(v
 export function normalizeSettings(input = {}) {
   const s = input && typeof input === 'object' ? input : {};
   const d = DEFAULT_SETTINGS;
-  const model = str(s.model, 120, d.model).trim();
+  // One-time migration: older versions saved their default model ids; move those to today's defaults.
+  const fromOld = !(typeof s.settingsVersion === 'number' && s.settingsVersion >= SETTINGS_VERSION);
+  const migrate = (key, value) => (fromOld && LEGACY_DEFAULTS[key].includes(value) ? d[key] : value);
+  const model = migrate('model', str(s.model, 120, d.model).trim());
+  const sttRaw = migrate('sttModel', str(s.sttModel, 120, d.sttModel).trim());
   return {
     model: /^[\w.\-/:@~]+$/.test(model) ? model : d.model,
     referer: str(s.referer, 200, d.referer),
@@ -28,7 +34,9 @@ export function normalizeSettings(input = {}) {
     smoothSpeed: num(s.smoothSpeed, 0.5, 5, d.smoothSpeed),
     inputMode: ['auto', 'voice', 'keyboard'].includes(s.inputMode) ? s.inputMode : d.inputMode,
     voiceEngine: ['auto', 'browser', 'openrouter'].includes(s.voiceEngine) ? s.voiceEngine : d.voiceEngine,
-    sttModel: (() => { const m = str(s.sttModel, 120, d.sttModel).trim(); return /^[\w.\-/:@~]+$/.test(m) ? m : d.sttModel; })(),
+    sttModel: /^[\w.\-/:@~]+$/.test(sttRaw) ? sttRaw : d.sttModel,
+    reasoningEffort: EFFORT_SETTINGS.includes(s.reasoningEffort) ? s.reasoningEffort : d.reasoningEffort,
+    settingsVersion: SETTINGS_VERSION,
     diagnostics: bool(s.diagnostics, d.diagnostics),
     preferMR: bool(s.preferMR, d.preferMR),
     showStats: bool(s.showStats, d.showStats)
@@ -128,6 +136,10 @@ export function createStore(provider) {
 
     /** Remembers that SpeechRecognition failed on this browser so we route to the keyboard. */
     async getSpeechStatus() { const s = await provider.get(K.speech); return s && typeof s === 'object' ? s : {}; },
-    async setSpeechStatus(s) { await provider.set(K.speech, s); }
+    async setSpeechStatus(s) { await provider.set(K.speech, s); },
+
+    /** Cached slim model-capability map from the OpenRouter catalogue ({at, caps}). */
+    async getModelCaps() { const c = await provider.get('modelCaps'); return c && typeof c === 'object' && c.caps ? c : null; },
+    async setModelCaps(caps) { await provider.set('modelCaps', { at: Date.now(), caps }); }
   };
 }

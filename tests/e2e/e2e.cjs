@@ -24,6 +24,7 @@ const check = async (name, fn) => {
   });
 
   let mode = 'ok';
+  let lastBody = null;
   let attempts = 0;
   const envelopes = {
     create: { action: 'create_world', markup: '<a-sky id="sky" color="#223"></a-sky><a-box id="cube" class="interactive" position="0 1 -3" color="red"/><a-sphere id="ball" position="2 1 -3"/>', removed_ids: [], narration: 'Created.' },
@@ -34,6 +35,7 @@ const check = async (name, fn) => {
     const url = route.request().url();
     if (url.endsWith('/key')) return route.fulfill({ json: { data: { label: 'e2e', limit_remaining: 1 } } });
     attempts++;
+    lastBody = route.request().postDataJSON();
     if (mode === '401') return route.fulfill({ status: 401, json: { error: { message: 'No auth' } } });
     if (mode === '429-once' && attempts === 1) return route.fulfill({ status: 429, headers: { 'retry-after': '0' }, json: {} });
     if (mode === 'malformed') return route.fulfill({ json: { choices: [{ message: { content: 'sorry, no JSON here' }, finish_reason: 'stop' }] } });
@@ -118,6 +120,33 @@ const check = async (name, fn) => {
     assert.ok(!(await ids()).includes('cube'));
     await page.locator('.ws-toast button', { hasText: 'Undo' }).click();
     assert.ok((await ids()).includes('cube'));
+  });
+
+  await check('reasoning dropdown lists each model\u2019s own levels', async () => {
+    if (await page.locator('#ws-drawer').isHidden()) await page.click('#ws-drawer-toggle');
+    await page.click('.ws-tab[data-tab="settings"]');
+    const opts = () => page.$$eval('#ws-effort option', (o) => o.map((x) => x.value));
+    assert.deepEqual(await opts(), ['auto', 'provider', 'low', 'medium', 'high', 'xhigh', 'max']);
+    await page.selectOption('#ws-model-select', 'x-ai/grok-4.7');
+    await page.waitForFunction(() => document.querySelectorAll('#ws-effort option').length === 6);
+    assert.deepEqual(await opts(), ['auto', 'provider', 'low', 'medium', 'high', 'xhigh']);
+    assert.match(await page.locator('#ws-effort-hint').textContent(), /Sends: medium/);
+    await page.selectOption('#ws-model-select', 'anthropic/claude-sonnet-5.5');
+    await page.waitForFunction(() => document.querySelectorAll('#ws-effort option').length === 7);
+  });
+
+  await check('request carries the selected effort; provider default omits it', async () => {
+    mode = 'env:create';
+    await ws(() => window.worldsmith.app.updateSettings({ reasoningEffort: 'high' }));
+    assert.equal(await submit('effort high'), true);
+    assert.deepEqual(lastBody.reasoning, { effort: 'high', exclude: true });
+    assert.equal(lastBody.model, 'anthropic/claude-sonnet-5.5');
+    await ws(() => window.worldsmith.app.updateSettings({ reasoningEffort: 'provider' }));
+    assert.equal(await submit('effort default'), true);
+    assert.equal('reasoning' in lastBody, false);
+    await ws(() => window.worldsmith.app.updateSettings({ reasoningEffort: 'auto' }));
+    await ws(() => window.worldsmith.app.undo());
+    await ws(() => window.worldsmith.app.undo());
   });
 
   await check('world, key and history persist across reload', async () => {

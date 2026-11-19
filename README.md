@@ -30,7 +30,12 @@ npm run dev:https    # self-signed cert; open https://<your-ip>:5173 and accept 
 3. Press **Validate key**. It checks the key and sends a tiny request to the selected model.
 
 The key is stored only in `localStorage` and is sent only to `openrouter.ai`.
-Default model: `deepseek/deepseek-v4-flash`. Pick another from the dropdown or type any OpenRouter model id.
+Presets: **Claude Sonnet 5.5** (default) and **Grok 4.7**. You can type any other OpenRouter model id;
+[docs/model-selection.md](docs/model-selection.md) lists researched candidates worth trying.
+
+**Reasoning effort** (Settings): the dropdown shows only the levels the selected model supports, plus
+*Auto* (medium for both presets) and *Provider default*. Higher effort usually gives richer worlds but a
+longer wait. `npm run check:models` re-checks the presets against the live OpenRouter catalogue.
 
 ## Controls
 
@@ -59,7 +64,7 @@ The 2D page mirrors all of this and works with mouse and keyboard only.
   Switching VR ⇄ MR inside a session may ask for one extra tap.
 - **Voice**: Meta Quest Browser has no `SpeechRecognition`, so Worldsmith records the mic itself
   (16 kHz WAV, max 30 s) and transcribes the clip with an audio-capable OpenRouter model
-  (default `google/gemini-3.5-flash-lite`, roughly $0.0001 per 10 s clip), then sends the text as your prompt.
+  (default `google/gemini-3.1-flash-lite`, roughly $0.0002 per 10 s clip, reasoning off), then sends the text as your prompt.
   The audio goes to that model's provider via OpenRouter. Browsers that do have working
   `SpeechRecognition` (desktop Chrome/Edge) use it instead. You can force either in
   **Settings → Voice engine**, or pick **Input: Keyboard** to always use the in-VR keyboard.

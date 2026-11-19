@@ -5,6 +5,7 @@
  * toasts, diagnostics. A pure view over `app` (see main.js) — no A-Frame here.
  */
 import { MODEL_PRESETS, STT_MODEL_PRESETS } from '../core/config.js';
+import { EFFORT_LABEL, EFFORT_ORDER } from '../llm/models.js';
 import { onLog, getLogEntries } from '../core/log.js';
 
 const PHASE_LABEL = { idle: 'Ready', listening: 'Listening…', thinking: 'Dreaming up your world…', speaking: 'Speaking', error: 'Error' };
@@ -140,6 +141,39 @@ export function initDomUI({ app, bus }) {
   });
   modelInput.addEventListener('change', () => { if (modelInput.value.trim()) app.updateSettings({ model: modelInput.value.trim() }); });
 
+  // Reasoning effort: options are rebuilt for the selected model (levels differ per model).
+  const effortSelect = $('ws-effort');
+  const effortText = $('ws-effort-text');
+  const effortHint = $('ws-effort-hint');
+  effortSelect.addEventListener('change', () => app.updateSettings({ reasoningEffort: effortSelect.value }));
+  effortText.addEventListener('change', () => {
+    const v = effortText.value.trim().toLowerCase();
+    if (EFFORT_ORDER.includes(v)) app.updateSettings({ reasoningEffort: v });
+    else setKeyStatus(`Unknown reasoning level "${v}". Use one of: ${EFFORT_ORDER.join(', ')}.`, 'error');
+  });
+  function renderEffort() {
+    const info = app.getEffortInfo();
+    const opts = [['auto', `Auto (recommended: ${info.recommended ? EFFORT_LABEL[info.recommended].toLowerCase() : 'provider default'})`],
+      ['provider', `Provider default${info.defaultEffort ? ` (${EFFORT_LABEL[info.defaultEffort].toLowerCase()})` : ''}`],
+      ...info.levels.map((l) => [l, EFFORT_LABEL[l]])];
+    // Keep the saved level selectable even if this model doesn't list it (it's snapped when sent).
+    if (!opts.some(([v]) => v === info.setting)) opts.push([info.setting, `${EFFORT_LABEL[info.setting] || info.setting} (not offered → ${info.sent || 'provider default'})`]);
+    const sig = opts.map((o) => o.join('=')).join('|');
+    if (effortSelect.dataset.sig !== sig) {
+      effortSelect.replaceChildren(...opts.map(([v, t]) => new Option(t, v)));
+      effortSelect.dataset.sig = sig;
+    }
+    effortSelect.value = info.setting;
+    effortSelect.disabled = info.known && !info.reasoning;
+    effortText.hidden = info.known;
+    if (!info.known && document.activeElement !== effortText) effortText.value = EFFORT_ORDER.includes(info.setting) ? info.setting : '';
+    let hint;
+    if (info.known && !info.reasoning) hint = 'This model has no reasoning control.';
+    else if (!info.known) hint = info.loading ? 'Loading this model\u2019s reasoning levels…' : 'Levels not confirmed for this model; type one or pick from the list.';
+    else hint = `Sends: ${info.sent ? EFFORT_LABEL[info.sent].toLowerCase() : 'provider default'}. Higher = better worlds, longer wait.`;
+    effortHint.textContent = hint;
+  }
+
   const sttSelect = $('ws-stt-select');
   for (const m of STT_MODEL_PRESETS) sttSelect.append(new Option(m.label, m.id));
   sttSelect.append(new Option('Custom (type below)…', '__custom'));
@@ -187,6 +221,7 @@ export function initDomUI({ app, bus }) {
     $('ws-diagnostics').checked = s.diagnostics;
     $('ws-stats').checked = s.showStats;
     $('ws-diag-box').hidden = !s.diagnostics;
+    renderEffort();
   }
 
   /* ---------------- history ---------------- */

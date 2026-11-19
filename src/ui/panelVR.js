@@ -13,6 +13,7 @@
 import AFRAME from 'aframe';
 import { THEME, placeInFront } from './canvasPanel.js';
 import { MODEL_PRESETS } from '../core/config.js';
+import { EFFORT_LABEL } from '../llm/models.js';
 
 const THREE = AFRAME.THREE;
 
@@ -273,6 +274,17 @@ export function initVRUI({ sceneEl, app, bus, keyboard }) {
       api.button('model-custom', right - 220, y, 220, rowH, 'Custom…', { fontSize: 28 });
       y += rowH + gap;
 
+      // Reasoning effort: cycles through the levels this model offers.
+      const ei = app.getEffortInfo();
+      const cur = ei.setting === 'auto' ? `Auto → ${ei.sent ? EFFORT_LABEL[ei.sent].toLowerCase() : 'default'}`
+        : ei.setting === 'provider' ? 'Provider default' : EFFORT_LABEL[ei.setting] || ei.setting;
+      label('Reasoning effort', ei.known && !ei.reasoning ? 'No reasoning control for this model'
+        : `${cur} · higher = better worlds, longer wait`);
+      api.button('effort-prev', right - 420, y, 90, rowH, '◀', { disabled: ei.known && !ei.reasoning });
+      api.button('effort-next', right - 320, y, 90, rowH, '▶', { disabled: ei.known && !ei.reasoning });
+      api.text(ei.sent ? EFFORT_LABEL[ei.sent] : 'Default', right - 110, y + rowH / 2 - 16, { size: 28, weight: 700, align: 'center', color: THEME.accent });
+      y += rowH + gap;
+
       const toggle = (id, title, on, sub) => {
         label(title, sub);
         api.button(id, right - 190, y, 190, rowH, on ? 'On' : 'Off', { variant: on ? 'on' : undefined, fontSize: 30 });
@@ -319,6 +331,14 @@ export function initVRUI({ sceneEl, app, bus, keyboard }) {
           P(settingsEl).invalidate();
           settingsStatus = await app.validateKey();
           break;
+        case 'effort-prev': case 'effort-next': {
+          const ei = app.getEffortInfo();
+          const list = ['auto', 'provider', ...ei.levels];
+          const i = Math.max(0, list.indexOf(ei.setting));
+          const next = list[(i + (id === 'effort-next' ? 1 : -1) + list.length) % list.length];
+          app.updateSettings({ reasoningEffort: next });
+          break;
+        }
         case 'model-prev': cycleModel(-1); break;
         case 'model-next': cycleModel(1); break;
         case 'model-custom':

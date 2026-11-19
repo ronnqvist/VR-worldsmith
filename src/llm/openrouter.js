@@ -6,6 +6,7 @@
 import { OPENROUTER_BASE } from '../core/config.js';
 import { UserFacingError } from '../core/errors.js';
 import { createLogger } from '../core/log.js';
+import { planReasoning, lowestEffort, effortOptions, EFFORT_LABEL } from './models.js';
 
 const log = createLogger('openrouter');
 const TIMEOUT_MS = 120_000;
@@ -110,49 +111,90 @@ async function request(path, { method = 'POST', headers, body, signal, fetchImpl
   }
 }
 
+const REASONING_REJECTED = /reasoning|effort|thinking|budget/i;
+const JSON_MODE_REJECTED = /response_format|json_object|json mode/i;
+
 /**
  * Sends a chat completion that must return a JSON object.
- * @returns {Promise<{content:string, usage:object|null, model:string, finishReason:string|null}>}
+ * `reasoningEffort` is the user's setting ('auto' | 'provider' | none … max); it is
+ * resolved per model (see models.js), and max_tokens is scaled so thinking doesn't
+ * eat the visible output.
+ * @returns {Promise<{content:string, usage:object|null, model:string, finishReason:string|null, effort:string|null, notes:string[]}>}
  */
 export async function chatJSON({
-  apiKey, model, messages, referer, title, temperature = 0.7, maxTokens = 12000, signal, fetchImpl
+  apiKey, model, messages, referer, title, temperature = 0.7, maxTokens = 12000, reasoningEffort = 'auto', signal, fetchImpl
 }) {
   if (!apiKey) throw new UserFacingError('Add your OpenRouter API key in Settings first.', { code: 'no_key' });
   if (!model) throw new UserFacingError('Choose a model in Settings first.', { code: 'no_model' });
   const headers = buildHeaders({ apiKey, referer, title });
+  const plan = planReasoning(model, reasoningEffort, maxTokens);
   const body = {
     model,
     messages,
     response_format: { type: 'json_object' },
     temperature,
-    max_tokens: maxTokens,
-    stream: false
+    max_tokens: plan.maxTokens,
+    stream: false,
+    // Fastest healthy host first: the user is waiting in VR.
+    provider: { sort: 'throughput' }
   };
+  if (plan.reasoning) body.reasoning = plan.reasoning;
+  let effort = plan.effort;
+  const notes = [];
+  let lowered = false;
   const started = performance.now();
-  let data;
-  try {
-    data = await request('/chat/completions', { headers, body, signal, fetchImpl });
-  } catch (err) {
-    // Some providers don't support response_format; retry once without it.
-    if (err.code === 'bad_request' && /response_format|json_object|json mode/i.test(err.detail || '')) {
-      log.warn('model rejected response_format, retrying without it');
-      const { response_format: _drop, ...rest } = body;
-      data = await request('/chat/completions', { headers, body: rest, signal, fetchImpl });
-    } else throw err;
+  for (;;) {
+    let data;
+    try {
+      data = await request('/chat/completions', { headers, body, signal, fetchImpl });
+    } catch (err) {
+      // Some providers reject response_format or the reasoning parameter: retry once without each.
+      if (err.code === 'bad_request' && body.response_format && JSON_MODE_REJECTED.test(err.detail || '')) {
+        log.warn('model rejected response_format, retrying without it');
+        delete body.response_format;
+        continue;
+      }
+      if (err.code === 'bad_request' && body.reasoning && REASONING_REJECTED.test(err.detail || '')) {
+        log.warn('model rejected the reasoning parameter, retrying without it');
+        delete body.reasoning;
+        body.max_tokens = maxTokens;
+        effort = null;
+        notes.push('This model rejected the reasoning setting; sent without it.');
+        continue;
+      }
+      throw err;
+    }
+    // OpenRouter can return 200 with an `error` object (provider failure mid-stream).
+    if (data?.error) throw mapHttpError(Number(data.error.code) || 502, data);
+    const choice = data?.choices?.[0];
+    const content = choice?.message?.content;
+    const finishReason = choice?.finish_reason || choice?.native_finish_reason || null;
+    const empty = typeof content !== 'string' || !content.trim();
+    log.info(`completion in ${Math.round(performance.now() - started)} ms`, { model: data?.model, usage: data?.usage, finishReason, effort });
+    if (finishReason === 'length' && empty && body.reasoning && !lowered) {
+      // Thinking used the whole budget before any JSON: retry once at the lowest level.
+      const low = lowestEffort(model);
+      lowered = true;
+      if (low && low !== effort) {
+        log.warn(`reasoning at "${effort}" used the whole output budget; retrying at "${low}"`);
+        const p2 = planReasoning(model, low, maxTokens);
+        if (p2.reasoning) body.reasoning = p2.reasoning; else delete body.reasoning;
+        body.max_tokens = p2.maxTokens;
+        notes.push(`Reasoning at "${effort}" used the whole output budget; retried at "${low}".`);
+        effort = low;
+        continue;
+      }
+    }
+    if (finishReason === 'length') {
+      throw new UserFacingError(effort && effort !== 'none' && effort !== 'low'
+        ? `The model ran out of output tokens (reasoning: ${effort}). Try a lower reasoning effort or raise Max tokens.`
+        : 'The model ran out of output tokens mid-world. Try a simpler request or raise Max tokens.', { code: 'length' });
+    }
+    if (empty) {
+      throw new UserFacingError('The model returned an empty reply. Try again or pick another model.', { code: 'empty' });
+    }
+    return { content, usage: data.usage || null, model: data.model || model, finishReason, effort, notes };
   }
-  // OpenRouter can return 200 with an `error` object (provider failure mid-stream).
-  if (data?.error) throw mapHttpError(Number(data.error.code) || 502, data);
-  const choice = data?.choices?.[0];
-  const content = choice?.message?.content;
-  const finishReason = choice?.finish_reason || choice?.native_finish_reason || null;
-  log.info(`completion in ${Math.round(performance.now() - started)} ms`, { model: data?.model, usage: data?.usage, finishReason });
-  if (finishReason === 'length') {
-    throw new UserFacingError('The model ran out of output tokens mid-world. Try a simpler request or raise Max tokens.', { code: 'length' });
-  }
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new UserFacingError('The model returned an empty reply. Try again or pick another model.', { code: 'empty' });
-  }
-  return { content, usage: data.usage || null, model: data.model || model, finishReason };
 }
 
 /**
@@ -160,7 +202,7 @@ export async function chatJSON({
  * then a 1-token-ish completion against the selected model.
  * @returns {Promise<{ok:boolean, key:{label?:string, limitRemaining?:number|null, usage?:number}|null, model:{ok:boolean, message:string}}>}
  */
-export async function validateKey({ apiKey, model, referer, title, signal, fetchImpl }) {
+export async function validateKey({ apiKey, model, referer, title, reasoningEffort = 'auto', signal, fetchImpl }) {
   if (!apiKey) throw new UserFacingError('Enter an API key first.', { code: 'no_key' });
   const headers = buildHeaders({ apiKey, referer, title });
   const info = await request('/key', { method: 'GET', headers, signal, fetchImpl });
@@ -169,14 +211,23 @@ export async function validateKey({ apiKey, model, referer, title, signal, fetch
   let modelResult = { ok: false, message: 'not tested' };
   if (model) {
     try {
-      await chatJSON({
-        apiKey, model, referer, title, signal, fetchImpl, maxTokens: 16, temperature: 0,
+      // Ping at the model's lowest reasoning level (cheap); report what the real setting resolves to.
+      const opts = effortOptions(model);
+      const ping = await chatJSON({
+        apiKey, model, referer, title, signal, fetchImpl, maxTokens: 64, temperature: 0,
+        reasoningEffort: lowestEffort(model) || 'provider',
         messages: [
           { role: 'system', content: 'Reply with the JSON object {"ok":true} and nothing else.' },
           { role: 'user', content: 'ping' }
         ]
       });
-      modelResult = { ok: true, message: `Model "${model}" answered.` };
+      void ping;
+      const effective = planReasoning(model, reasoningEffort, 12000).effort;
+      const levels = opts.known ? (opts.levels.length ? opts.levels.map((l) => EFFORT_LABEL[l].toLowerCase()).join(', ') : 'none') : 'unknown';
+      modelResult = {
+        ok: true,
+        message: `Model "${model}" answered. Reasoning levels: ${levels}; your setting sends: ${effective || 'provider default'}.`
+      };
     } catch (err) {
       // A 'length' finish still proves the model is reachable.
       if (err.code === 'length') modelResult = { ok: true, message: `Model "${model}" answered.` };
@@ -226,10 +277,20 @@ export async function transcribeAudio({ apiKey, model, wavBase64, referer, title
       }
     ]
   };
+  // Transcription needs no thinking: send the model's lowest level.
+  const low = lowestEffort(model);
+  if (low === 'none') body.reasoning = { effort: 'none' };
+  else if (low) body.reasoning = { effort: low, exclude: true };
   const started = performance.now();
   let data;
   try {
-    data = await request('/chat/completions', { headers, body, signal, fetchImpl });
+    try {
+      data = await request('/chat/completions', { headers, body, signal, fetchImpl });
+    } catch (err) {
+      if (!(err.code === 'bad_request' && body.reasoning && REASONING_REJECTED.test(err.detail || ''))) throw err;
+      delete body.reasoning;
+      data = await request('/chat/completions', { headers, body, signal, fetchImpl });
+    }
   } catch (err) {
     if (err.code === 'bad_request' || err.code === 'model') {
       throw new UserFacingError(`The transcription model "${model}" could not process audio. Pick an audio-capable model in Settings.`, { code: 'stt_model', cause: err, detail: err.detail });

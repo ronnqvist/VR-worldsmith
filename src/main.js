@@ -29,6 +29,7 @@ import { generateAmbientLoop } from './audio/ambient.js';
 import { chatJSON, validateKey as validateOpenRouterKey, looksLikeKey } from './llm/openrouter.js';
 import { buildSystemPrompt } from './llm/systemPrompt.js';
 import { buildMessages, parseEnvelope } from './llm/envelope.js';
+import { effortOptions, planReasoning, fetchCatalogue, setCatalogue, KNOWN_CAPS } from './llm/models.js';
 import { createDefaultProvider } from './storage/localProvider.js';
 import { createStore } from './storage/store.js';
 import { buildExport, validateImport, combineImport, exportFilename, MAX_IMPORT_BYTES } from './storage/exportImport.js';
@@ -245,8 +246,9 @@ async function boot() {
       const s = state.settings;
       const res = await chatJSON({
         apiKey, model: s.model, messages, referer: s.referer, title: s.title,
-        temperature: s.temperature, maxTokens: s.maxTokens, signal: inflight.signal
+        temperature: s.temperature, maxTokens: s.maxTokens, reasoningEffort: s.reasoningEffort, signal: inflight.signal
       });
+      for (const n of res.notes || []) toast(n, 'info', 6000);
       const env = parseEnvelope(res.content);
       const report = injector.applyEnvelope(env);
       if (report.warnings.length) log.warn(`sanitizer/injector notes (${report.warnings.length})`, report.warnings.slice(0, 20));
@@ -359,6 +361,7 @@ async function boot() {
 
   async function updateSettings(partial) {
     state.settings = await store.saveSettings(partial);
+    if (partial.model) ensureCaps(state.settings.model);
     applySettings();
     refreshVoiceState();
     changed();
@@ -380,7 +383,8 @@ async function boot() {
     if (!apiKey) return 'Enter a key first.';
     try {
       const s = state.settings;
-      const r = await validateOpenRouterKey({ apiKey, model: s.model, referer: s.referer, title: s.title });
+      await ensureCaps(s.model);
+      const r = await validateOpenRouterKey({ apiKey, model: s.model, referer: s.referer, title: s.title, reasoningEffort: s.reasoningEffort });
       const credit = typeof r.key.limitRemaining === 'number' ? ` · remaining limit $${r.key.limitRemaining.toFixed(2)}` : '';
       const label = r.key.label ? ` (${r.key.label})` : '';
       return `Key valid ✓${label}${credit}. ${r.model.ok ? r.model.message : `Model check failed: ${r.model.message}`}`;
@@ -502,7 +506,41 @@ async function boot() {
   bus.on('xr:exit', () => { keyboard.close(); });
 
   /* ---------- app facade ---------- */
+  /* ---------- model capabilities (reasoning levels differ per model) ---------- */
+  const CAPS_TTL = 24 * 3600 * 1000;
+  let capsLoading = null;
+  const cachedCaps = await store.getModelCaps().catch(() => null);
+  if (cachedCaps) setCatalogue(cachedCaps.caps);
+  let capsAt = cachedCaps?.at || 0;
+  let capsFailedAt = 0;
+  /**
+   * Loads the live catalogue at most once per TTL (and not again for a minute after
+   * a failure), so unknown custom ids can't trigger repeated fetches.
+   */
+  function ensureCaps(modelId) {
+    if (KNOWN_CAPS[modelId]) return Promise.resolve(); // verified presets need no download
+    const fresh = Date.now() - capsAt < CAPS_TTL;
+    if (fresh || Date.now() - capsFailedAt < 60_000) return Promise.resolve();
+    if (!capsLoading) {
+      capsLoading = fetchCatalogue()
+        .then((caps) => { capsAt = Date.now(); return store.setModelCaps(caps); })
+        .then(() => log.info('model catalogue cached'))
+        .catch((err) => { capsFailedAt = Date.now(); log.warn('model catalogue unavailable', err); })
+        .finally(() => { capsLoading = null; changed(); });
+      changed();
+    }
+    return capsLoading;
+  }
+  /** Per-model reasoning options + what the current setting resolves to, for both UIs. */
+  function getEffortInfo(modelId = state.settings.model) {
+    const opts = effortOptions(modelId);
+    const sent = planReasoning(modelId, state.settings.reasoningEffort, state.settings.maxTokens).effort;
+    return { ...opts, setting: state.settings.reasoningEffort, sent, loading: !!capsLoading };
+  }
+  ensureCaps(state.settings.model);
+
   const app = {
+    getEffortInfo,
     state,
     submitPrompt,
     listenStart,

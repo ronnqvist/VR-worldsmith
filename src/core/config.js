@@ -33,25 +33,33 @@ export const UNDO_LIMIT = 20;
 export const CONTEXT_EXCHANGES = 3;
 
 export const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
-export const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
+export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5.5';
 
-/** Suggested models for the dropdown — any OpenRouter model id may be typed instead. */
+/**
+ * World-generation presets: only models tested to produce good worlds.
+ * Other candidates and their trade-offs are in docs/model-selection.md; any
+ * OpenRouter id can still be typed into Settings.
+ */
 export const MODEL_PRESETS = Object.freeze([
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash (default, cheap)' },
-  { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
-  { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'openai/gpt-4.1-mini', label: 'GPT-4.1 mini' },
-  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5' },
-  { id: 'qwen/qwen3-coder', label: 'Qwen3 Coder' }
+  { id: 'anthropic/claude-sonnet-5.5', label: 'Claude Sonnet 5.5 (default)' },
+  { id: 'x-ai/grok-4.7', label: 'Grok 4.7 (newest Grok)' }
 ]);
 
+/** Former defaults that users never chose explicitly: migrated once (settingsVersion 2). */
+export const LEGACY_DEFAULTS = Object.freeze({
+  model: ['deepseek/deepseek-v4-flash'],
+  sttModel: ['google/gemini-3.5-flash-lite']
+});
+export const SETTINGS_VERSION = 2;
+
 /** Audio-capable models for speech-to-text when the browser has no SpeechRecognition. */
-export const DEFAULT_STT_MODEL = 'google/gemini-3.5-flash-lite';
+export const DEFAULT_STT_MODEL = 'google/gemini-3.1-flash-lite';
 export const STT_MODEL_PRESETS = Object.freeze([
-  { id: 'google/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (default, cheap)' },
-  { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
-  { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'openai/gpt-audio-mini', label: 'GPT Audio mini' }
+  { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite (default, most accurate cheap)' },
+  { id: 'google/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
+  { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite (cheapest)' },
+  { id: 'mistralai/voxtral-small-24b-2507', label: 'Voxtral Small (Mistral)' },
+  { id: 'openai/gpt-audio-mini', label: 'GPT Audio mini (OpenAI)' }
 ]);
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -66,6 +74,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   inputMode: 'auto',      // 'auto' | 'voice' | 'keyboard'
   voiceEngine: 'auto',    // 'auto' | 'browser' (Web Speech) | 'openrouter' (record + transcribe)
   sttModel: DEFAULT_STT_MODEL,
+  reasoningEffort: 'auto', // 'auto' | 'provider' | none … max (options shown per model)
+  settingsVersion: SETTINGS_VERSION,
   diagnostics: false,
   preferMR: false,
   showStats: false
