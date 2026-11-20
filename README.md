@@ -6,6 +6,8 @@ with a whitelist, injects it into the scene and animates it in.
 
 Live (static) build: <https://ronnqvist.github.io/VR-worldsmith/>
 
+Project specification (usable as a prompt for a coding agent): [specs/prompt.md](specs/prompt.md)
+
 ## Quick start
 
 ```bash
